@@ -1,0 +1,11 @@
+services:
+  postgres:
+    image: postgres:alpine
+    environment:
+      - POSTGRES_PASSWORD=123456
+    volumes:
+      - ./db:/var/lib/postgresql/data
+      # скрипт ниже выполится при первом создании базы
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"

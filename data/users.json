@@ -1,0 +1,52 @@
+{
+    "type": "array",
+    "length": {
+        "type": "number",
+        "constant": 1
+    },
+    "content": {
+        "type": "object",
+        "email": {
+            "type": "unique",
+            "content": {
+                "type": "string",
+                "faker": {
+                    "generator": "free_email"
+                }
+            }
+        },
+        "first": {
+            "type": "string",
+            "faker": {
+                "generator": "first_name"
+            }
+        },
+        "last": {
+            "type": "string",
+            "faker": {
+                "generator": "last_name"
+            }
+        },
+        "city": {
+            "type": "string",
+            "faker": {
+                "generator": "city_name"
+            }
+        },
+        "county": {
+            "type": "string",
+            "faker": {
+                "generator": "country_name"
+            }
+        },
+        "age": {
+            "type": "number",
+            "subtype": "i32",
+            "range": {
+                "low": 18,
+                "high": 55,
+                "step": 1
+            }
+        }
+    }
+}
