@@ -85,7 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = Pool::builder()
         .max_size(10)
         .min_idle(Some(10))
-        .test_on_check_out(true)
+        .test_on_check_out(false)
         .build(manager)
         .expect("can't connect to database");
 
