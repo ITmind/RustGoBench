@@ -3,4 +3,5 @@ db
 tokens.txt
 bench
 *.exe
+*.dll
 

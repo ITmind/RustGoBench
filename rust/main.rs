@@ -1,3 +1,5 @@
+mod schema;
+
 use axum::{
     extract::State,
     http::{header::AUTHORIZATION, HeaderMap, StatusCode},
@@ -5,9 +7,12 @@ use axum::{
     routing::get,
     Json, Router,
 };
+use diesel::{
+    prelude::*,
+    r2d2::{ConnectionManager, Pool},
+};
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
-use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
@@ -15,17 +20,18 @@ struct Claims {
     exp: usize,
 }
 
-#[derive(Debug, Deserialize, Serialize, sqlx::FromRow)]
+#[derive(Debug, Deserialize, Serialize, Queryable, Selectable)]
+#[diesel(table_name = crate::schema::users)]
 pub struct User {
     pub email: String,
-    pub first: Option<String>,
-    pub last: Option<String>,
-    pub city: Option<String>,
-    pub county: Option<String>,
-    pub age: Option<i32>,
+    pub first: String,
+    pub last: String,
+    pub city: String,
+    pub county: String,
+    pub age: i32,
 }
 
-type ConnectionPool = Pool<Postgres>;
+type ConnectionPool = Pool<ConnectionManager<PgConnection>>;
 
 async fn root(headers: HeaderMap, State(pool): State<ConnectionPool>) -> impl IntoResponse {
     let jwt_secret = "mysuperPUPERsecret100500security";
@@ -47,21 +53,24 @@ async fn root(headers: HeaderMap, State(pool): State<ConnectionPool>) -> impl In
         }
     };
 
-    let email = token.claims.email;
+    let conn = &mut pool.get().unwrap();
+
+    use crate::schema::users::dsl::*;
+    let _email = token.claims.email;
     // let email = String::from("madeline_dolores@hotmail.com");
-    let query_result: Result<User, sqlx::Error> =
-        sqlx::query_as(r#"SELECT *  FROM USERS WHERE email=$1"#)
-            .bind(email)
-            .fetch_one(&pool)
-            .await;
+    let query_result = users
+        .filter(email.eq(_email))
+        .limit(1)
+        .select(User::as_select())
+        .first(conn);
 
     match query_result {
         Ok(user) => {
             return (StatusCode::ACCEPTED, Json(user)).into_response();
         }
-        Err(sqlx::Error::RowNotFound) => {
-            return (StatusCode::NOT_FOUND, "user not found").into_response();
-        }
+        // Err(sqlx::Error::RowNotFound) => {
+        //     return (StatusCode::NOT_FOUND, "user not found").into_response();
+        // }
         Err(_e) => {
             println!("error: {}", _e.to_string());
             return (StatusCode::INTERNAL_SERVER_ERROR, "error").into_response();
@@ -72,10 +81,12 @@ async fn root(headers: HeaderMap, State(pool): State<ConnectionPool>) -> impl In
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let database_url = String::from("postgres://postgres:123456@localhost/testbench");
-    let pool = PgPoolOptions::new()
-        .max_connections(10)
-        .connect(&database_url)
-        .await
+    let manager = ConnectionManager::<PgConnection>::new(database_url);
+    let pool = Pool::builder()
+        .max_size(10)
+        .min_idle(Some(10))
+        .test_on_check_out(true)
+        .build(manager)
         .expect("can't connect to database");
 
     println!("DB connect success");
