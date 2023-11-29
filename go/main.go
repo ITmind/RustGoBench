@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"database/sql"
 	"log"
 	"os"
@@ -10,7 +11,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
-	_ "github.com/lib/pq"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type MyCustomClaims struct {
@@ -29,19 +30,10 @@ type User struct {
 
 var jwtSecret = "mysuperPUPERsecret100500security"
 
-func getToken(c *fiber.Ctx) string {
-	hdr := c.Get("Authorization")
-	if hdr == "" {
-		return ""
-	}
-
-	token := strings.Split(hdr, "Bearer ")[1]
-	return token
-}
-
 func main() {
 	app := fiber.New()
-	db, err := sql.Open("postgres", "user=postgres password=123456 dbname=testbench sslmode=disable")
+	db, err := pgxpool.New(context.Background(), `user=postgres password=123456 dbname=testbench 
+			sslmode=disable pool_max_conns=10 pool_min_conns=10`)
 
 	if err != nil {
 		return
@@ -49,11 +41,15 @@ func main() {
 
 	defer db.Close()
 
-	db.SetMaxOpenConns(10)
-	db.SetMaxIdleConns(10)
-
 	app.Get("/", func(c *fiber.Ctx) error {
-		tokenString := getToken(c)
+
+		authHeader := c.Get("Authorization")
+		if authHeader == "" {
+			return c.SendStatus(fiber.StatusUnauthorized)
+		}
+
+		tokenString := strings.Split(authHeader, "Bearer ")[1]
+
 		if tokenString == "" {
 			return c.SendStatus(fiber.StatusUnauthorized)
 		}
@@ -67,17 +63,15 @@ func main() {
 		}
 
 		claims := token.Claims.(*MyCustomClaims)
-
-		query := "SELECT * FROM users WHERE email=$1"
-		row := db.QueryRow(query, claims.Email)
+		row := db.QueryRow(c.Context(), "SELECT * FROM users WHERE email=$1", claims.Email)
 
 		var user User = User{}
-		err2 := row.Scan(&user.Email, &user.First, &user.Last, &user.County, &user.City, &user.Age)
-		if err2 == sql.ErrNoRows {
+		err = row.Scan(&user.Email, &user.First, &user.Last, &user.County, &user.City, &user.Age)
+		if err == sql.ErrNoRows {
 			return c.SendStatus(fiber.StatusNotFound)
 		}
-		if err2 != nil {
-			log.Println(err2)
+		if err != nil {
+			log.Println(err)
 			return c.SendStatus(fiber.StatusInternalServerError)
 		}
 
@@ -94,7 +88,7 @@ func main() {
 
 		writer := bufio.NewWriter(file)
 
-		rows, err := db.Query("SELECT * FROM USERS OFFSET floor(random() * 100000) LIMIT 10")
+		rows, err := db.Query(c.Context(), "SELECT * FROM USERS OFFSET floor(random() * 100000) LIMIT 10")
 		if err != nil {
 			return c.SendStatus(fiber.StatusInternalServerError)
 		}
