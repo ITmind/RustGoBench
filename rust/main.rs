@@ -69,10 +69,6 @@ async fn root(headers: HeaderMap, State(pool): State<ConnectionPool>) -> impl In
     };
 }
 
-async fn alltoken() -> StatusCode {
-    StatusCode::CREATED
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let database_url = String::from("postgres://postgres:123456@localhost/testbench");
@@ -84,10 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("DB connect success");
 
-    let app = Router::new()
-        .route("/", get(root))
-        .route("/alltoken", get(alltoken))
-        .with_state(pool);
+    let app = Router::new().route("/", get(root)).with_state(pool);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await

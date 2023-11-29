@@ -74,11 +74,11 @@ func main() {
 		var user User = User{}
 		err2 := row.Scan(&user.Email, &user.First, &user.Last, &user.County, &user.City, &user.Age)
 		if err2 == sql.ErrNoRows {
-			log.Println("ErrNoRows")
+			return c.SendStatus(fiber.StatusNotFound)
 		}
 		if err2 != nil {
 			log.Println(err2)
-			return c.SendStatus(fiber.StatusNotFound)
+			return c.SendStatus(fiber.StatusInternalServerError)
 		}
 
 		return c.JSON(user)
