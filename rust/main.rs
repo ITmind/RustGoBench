@@ -35,7 +35,6 @@ type ConnectionPool = Pool<ConnectionManager<PgConnection>>;
 
 async fn root(headers: HeaderMap, State(pool): State<ConnectionPool>) -> impl IntoResponse {
     let jwt_secret = "mysuperPUPERsecret100500security";
-    let validation = Validation::new(Algorithm::HS256);
 
     let auth_header = headers.get(AUTHORIZATION).expect("no authorization header");
     let mut auth_hdr: &str = auth_header.to_str().unwrap();
@@ -44,11 +43,11 @@ async fn root(headers: HeaderMap, State(pool): State<ConnectionPool>) -> impl In
     let token = match decode::<Claims>(
         &auth_hdr,
         &DecodingKey::from_secret(jwt_secret.as_ref()),
-        &validation,
+        &Validation::new(Algorithm::HS256),
     ) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Application error: {e}");
+            println!("Application error: {e}");
             return (StatusCode::INTERNAL_SERVER_ERROR, "invalid token").into_response();
         }
     };
@@ -57,7 +56,6 @@ async fn root(headers: HeaderMap, State(pool): State<ConnectionPool>) -> impl In
 
     use crate::schema::users::dsl::*;
     let _email = token.claims.email;
-    // let email = String::from("madeline_dolores@hotmail.com");
     let query_result = users
         .filter(email.eq(_email))
         .limit(1)
@@ -68,9 +66,6 @@ async fn root(headers: HeaderMap, State(pool): State<ConnectionPool>) -> impl In
         Ok(user) => {
             return (StatusCode::ACCEPTED, Json(user)).into_response();
         }
-        // Err(sqlx::Error::RowNotFound) => {
-        //     return (StatusCode::NOT_FOUND, "user not found").into_response();
-        // }
         Err(_e) => {
             println!("error: {}", _e.to_string());
             return (StatusCode::INTERNAL_SERVER_ERROR, "error").into_response();
