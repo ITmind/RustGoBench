@@ -3,14 +3,15 @@
 //static GLOBAL: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
 // static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-use deadpool_postgres::{
-    Client, Config, ManagerConfig, Pool, PoolConfig, RecyclingMethod, Runtime,
-};
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
-use ntex::http::header::AUTHORIZATION;
+use ntex::http::header::{HeaderValue, AUTHORIZATION};
+use ntex::http::header::{CONTENT_TYPE, SERVER};
+use ntex::http::{HttpService, KeepAlive, Request, Response, StatusCode};
+use ntex::service::{Service, ServiceCtx, ServiceFactory};
 use ntex::web::{self, HttpRequest};
+use ntex::web::{Error, HttpResponse};
+use ntex::{time::Seconds, util::BoxFuture, util::PoolId};
 use serde::{Deserialize, Serialize};
-use tokio_postgres::NoTls;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
@@ -18,122 +19,84 @@ struct Claims {
     exp: usize,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct User {
-    pub email: String,
-    pub first: String,
-    pub last: String,
-    pub city: String,
-    pub county: String,
-    pub age: i32,
-}
+mod db;
 
-mod errors {
-    use deadpool_postgres::PoolError;
-    use derive_more::{Display, From};
-    use ntex::web::{HttpRequest, HttpResponse, WebResponseError};
-    use tokio_postgres::error::Error as PGError;
+const JWT_SECRET: &'static str = "mysuperPUPERsecret100500security";
 
-    #[derive(Display, From, Debug)]
-    pub enum MyError {
-        NotFound,
-        PGError(PGError),
-        PoolError(PoolError),
-    }
-    impl std::error::Error for MyError {}
+struct App(db::PgConnection);
 
-    impl WebResponseError for MyError {
-        fn error_response(&self, _: &HttpRequest) -> HttpResponse {
-            match *self {
-                MyError::NotFound => HttpResponse::NotFound().finish(),
-                MyError::PoolError(ref err) => {
-                    HttpResponse::InternalServerError().body(err.to_string())
+impl Service<Request> for App {
+    type Response = Response;
+    type Error = Error;
+    type Future<'f> = BoxFuture<'f, Result<Response, Error>> where Self: 'f;
+
+    fn call<'a>(&'a self, req: Request, _: ServiceCtx<'a, Self>) -> Self::Future<'a> {
+        Box::pin(async move {
+            match req.path() {
+                "/" => {
+                    let headers: &ntex::http::HeaderMap = req.headers();
+                    let auth_header = headers.get(AUTHORIZATION).expect("no authorization header");
+                    let mut auth_hdr: &str = auth_header.to_str().unwrap();
+                    auth_hdr = &auth_hdr.strip_prefix("Bearer ").unwrap();
+
+                    let token = decode::<Claims>(
+                        &auth_hdr,
+                        &DecodingKey::from_secret(JWT_SECRET.as_ref()),
+                        &Validation::new(Algorithm::HS256),
+                    )
+                    .ok();
+
+                    let _email = token.unwrap().claims.email;
+                    let body = self.0.get_user(_email).await;
+                    let mut res = HttpResponse::Ok().json(&body);
+                    res.headers_mut()
+                        .insert(SERVER, HeaderValue::from_static("N"));
+                    res.headers_mut()
+                        .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    Ok(res)
                 }
-                _ => HttpResponse::InternalServerError().finish(),
+                _ => Ok(Response::new(StatusCode::NOT_FOUND)),
             }
-        }
+        })
     }
 }
 
-async fn root(
-    pool: web::types::State<Pool>,
-    _req: HttpRequest,
-) -> Result<impl web::Responder, errors::MyError> {
-    let jwt_secret = "mysuperPUPERsecret100500security";
+struct AppFactory;
 
-    let headers: &ntex::http::HeaderMap = _req.headers();
-    let auth_header = headers.get(AUTHORIZATION).expect("no authorization header");
-    let mut auth_hdr: &str = auth_header.to_str().unwrap();
-    auth_hdr = &auth_hdr.strip_prefix("Bearer ").unwrap();
+impl ServiceFactory<Request> for AppFactory {
+    type Response = Response;
+    type Error = Error;
+    type Service = App;
+    type InitError = ();
+    type Future<'f> = BoxFuture<'f, Result<Self::Service, Self::InitError>>;
 
-    let token = match decode::<Claims>(
-        &auth_hdr,
-        &DecodingKey::from_secret(jwt_secret.as_ref()),
-        &Validation::new(Algorithm::HS256),
-    ) {
-        Ok(c) => c,
-        Err(e) => {
-            println!("Application error: {e}");
-            return Err(errors::MyError::NotFound);
-        }
-    };
+    fn create(&self, _: ()) -> Self::Future<'_> {
+        const DB_URL: &str = "postgres://postgres:123456@localhost/testbench";
 
-    let client: Client = pool.get().await.map_err(errors::MyError::PoolError)?;
-
-    let _email = token.claims.email;
-    let stmt = client
-        .prepare_cached("SELECT * FROM users WHERE email = $1")
-        .await
-        .unwrap();
-
-    let row = client.query_one(&stmt, &[&_email]).await.map(|row| User {
-        email: row.get(0),
-        first: row.get(1),
-        last: row.get(2),
-        city: row.get(3),
-        county: row.get(4),
-        age: row.get(5),
-    });
-
-    match row {
-        Ok(user) => return Ok(web::HttpResponse::Ok().json(&user)),
-        Err(_e) => {
-            println!("error: {}", _e.to_string());
-            return Err(errors::MyError::NotFound);
-        }
-    };
+        Box::pin(async move { Ok(App(db::PgConnection::connect(DB_URL).await)) })
+    }
 }
 
 #[ntex::main]
 async fn main() -> std::io::Result<()> {
-    println!("Starting http server: 127.0.0.1:3000");
+    println!(
+        "Starting http server: 127.0.0.1:3000 cpu:{}",
+        num_cpus::get()
+    );
 
-    let mut cfg = Config::new();
-    cfg.host = Some("localhost".to_string());
-    cfg.dbname = Some("testbench".to_string());
-    cfg.user = Some("postgres".to_string());
-    cfg.password = Some("123456".to_string());
-    cfg.manager = Some(ManagerConfig {
-        recycling_method: RecyclingMethod::Fast,
-    });
-    cfg.pool = Some(PoolConfig::new(10));
-    let pool = cfg.create_pool(Some(Runtime::Tokio1), NoTls).unwrap();
+    ntex::server::build()
+        .backlog(1024)
+        .bind("techempower", "0.0.0.0:3000", |cfg| {
+            cfg.memory_pool(PoolId::P1);
+            PoolId::P1.set_read_params(65535, 2048);
+            PoolId::P1.set_write_params(65535, 2048);
 
-    {
-        let client = pool.get().await.unwrap();
-        let stmt = client
-            .prepare_cached("SELECT * FROM users WHERE email = $1")
-            .await
-            .unwrap();
-    }
-
-    web::HttpServer::new(move || {
-        web::App::new()
-            .state(pool.clone())
-            .route("/", web::get().to(root))
-    })
-    .bind(("127.0.0.1", 3000))?
-    //.workers(num_cpus::get())
-    .run()
-    .await
+            HttpService::build()
+                .keep_alive(KeepAlive::Os)
+                .client_timeout(Seconds(0))
+                .h1(AppFactory)
+        })?
+        .workers(num_cpus::get())
+        .run()
+        .await
 }
