@@ -3,17 +3,14 @@
 //static GLOBAL: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
 // static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-use derive_more::{Display, Error};
-
 use deadpool_postgres::{
-    Client, Config, ManagerConfig, Pool, PoolConfig, RecyclingMethod, Runtime, Timeouts,
+    Client, Config, ManagerConfig, Pool, PoolConfig, RecyclingMethod, Runtime,
 };
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use ntex::http::header::AUTHORIZATION;
-use ntex::util::timeout::TimeoutService;
 use ntex::web::{self, HttpRequest};
 use serde::{Deserialize, Serialize};
-use tokio_postgres::{NoTls, Statement};
+use tokio_postgres::NoTls;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
