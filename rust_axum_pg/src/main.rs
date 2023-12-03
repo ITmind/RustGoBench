@@ -70,9 +70,6 @@ async fn serve() {
         .route("/", get(root))
         .with_state(pg_connection);
 
-    //let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    //axum::serve(listener, router).await.unwrap();
-
     server::builder()
         .serve(router.into_make_service())
         .await
